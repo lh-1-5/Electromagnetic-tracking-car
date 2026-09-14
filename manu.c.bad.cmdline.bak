@@ -1,0 +1,766 @@
+BROWSE INCDIR(..\..\libraries\zf_common;..\..\libraries\zf_components;..\..\libraries\zf_device;..\..\libraries\zf_driver;..\user;..\code) DEBUG PRINT(.\out_file\manu.lst) TABS(2) OBJECT(.\out_file\manu.obj) 
+#include "manu.h"
+/*
+*???????????????eeprom?????????????????????
+*uint8 iap_read_byte(uint32 addr)??????
+*void iap_write_byte(uint32 addr, uint8 byte);?????????????
+void iap_init(void);????????
+void iap_write_buff(uint32 addr, uint8 *buf, uint16 len)?????????????
+void iap_erase_page(uint32 addr)????????
+*???????????????1
+*
+*
+*/
+
+char textmunu[30];//????????????????????
+/*???????????????????????????????????*/
+uint16 kp_munuout,kp_3_munuout,kd_munuout,max_munuout,min_munuout,xianfumax_munuout,basic_munuout,kpspeed_munuout,kdspeed_munuout,kispeed_munuout;
+uint16 kpangle_munuout,kdangle_munuout,kiangle_munuout,maxangle_munuout,minangle_munuout,desiredangle_munuout;//???????
+uint16 run_munuout,show_munuout,start_cap_munuout,ben_enter_munuout,ben_angle_munuout,start_distance_munuout;//??????????
+
+typedef struct
+{
+uint32 addr;
+uint16 *value;
+} manu_eeprom_item_t;
+
+static uint16 manu_eeprom_read_u16(uint32 addr)
+{
+return (uint16)((uint16)iap_read_byte(addr) | ((uint16)iap_read_byte(addr + 1) << 8));
+}
+
+static void manu_eeprom_write_u16(uint32 addr, uint16 value)
+{
+iap_write_byte(addr, (uint8)value);
+iap_write_byte(addr + 1, (uint8)(value >> 8));
+}
+
+static void manu_save_all_to_eeprom(void)
+{
+uint8 i;
+const manu_eeprom_item_t items[] = {
+{kp_munu_addr, &kp_munuout},
+{kp_3_munu_addr, &kp_3_munuout},
+{kd_munu_addr, &kd_munuout},
+{max_munu_addr, &max_munuout},
+{min_munu_addr, &min_munuout},
+{xianfumax_munu_addr, &xianfumax_munuout},
+{basic_munu_addr, &basic_munuout},
+{kpspeed_munu_addr, &kpspeed_munuout},
+{kdspeed_munu_addr, &kdspeed_munuout},
+{kispeed_munu_addr, &kispeed_munuout},
+
+{kpangle_munu_addr, &kpangle_munuout},
+{kiangle_munu_addr, &kiangle_munuout},
+{kdangle_munu_addr, &kdangle_munuout},
+{maxangle_munu_addr, &maxangle_munuout},
+{minangle_munu_addr, &minangle_munuout},
+{desiredangle_munu_addr, &desiredangle_munuout},
+
+{run_munu_addr, &run_munuout},
+{show_munu_addr, &show_munuout},
+{start_cap_munu_addr, &start_cap_munuout},
+{ben_enter_munu_addr, &ben_enter_munuout},
+{ben_angle_munu_addr, &ben_angle_munuout},
+{start_distance_munu_addr, &start_distance_munuout},
+};
+
+iap_erase_page(Erase_EEPROM);
+for (i = 0; i < (uint8)(sizeof(items) / sizeof(items[0])); i++)
+{
+manu_eeprom_write_u16(items[i].addr, *items[i].value);
+}
+}
+
+char cursor=10;//???????????????????
+int t=0;
+
+ManuMenuState manu_menu_state = {0};
+ManuKeyEvent manu_key = MANU_KEY_NONE;
+
+#define MANU_MAIN_ITEM_COUNT   (8u)
+#define MANU_TURN_ITEM_COUNT   (10u)
+#define MANU_ANGLE_ITEM_COUNT  (10u)
+#define MANU_STATE_ITEM_COUNT  (10u)
+
+static ManuMenu main_menu;
+static ManuMenu turn_menu;
+static ManuMenu angle_menu;
+static ManuMenu state_menu;
+
+static ManuMenuItem main_items[MANU_MAIN_ITEM_COUNT];
+static ManuMenuItem turn_items[MANU_TURN_ITEM_COUNT];
+static ManuMenuItem angle_items[MANU_ANGLE_ITEM_COUNT];
+static ManuMenuItem state_items[MANU_STATE_ITEM_COUNT];
+
+static uint8 manu_exit_request = 0;
+
+static ManuMenuItem *manu_edit_item = 0;
+static uint16 manu_edit_origin = 0;
+static uint16 manu_last_local = 0;
+static float manu_last_float = -1.0f;
+
+static void manu_render_main(void)
+{
+char dummy;
+dummy = 0;
+main_manu_xianshi(&dummy);
+}
+
+static void manu_render_turn(void) { Manu_2_show(); }
+static void manu_render_angle(void) { manu_2_angle(); }
+static void manu_render_state(void) { manu_3_state(); }
+
+static void manu_action_black(void) { black_manu(); }
+static void manu_action_nothing(void)
+{
+char dummy;
+dummy = 0;
+nothing_function(&dummy);
+}
+
+static void manu_menu_setup(void)
+{
+/* ?????????????????? main_manu_xianshi ?????????????????????? */
+main_items[0].text = "Adjust param";
+main_items[0].child = &turn_menu;
+main_items[1].text = "Adjust paramangle";
+main_items[1].child = &angle_menu;
+main_items[2].text = "Adjust state";
+main_items[2].child = &state_menu;
+main_items[3].text = "";
+main_items[3].action = manu_action_black;
+main_items[4].text = "e";
+main_items[4].action = manu_action_black;
+main_items[5].text = "f";
+main_items[5].action = manu_action_black;
+main_items[6].text = "g";
+main_items[6].action = manu_action_black;
+main_items[7].text = "";
+main_items[7].action = manu_action_black;
+
+/* ?????????????*/
+turn_items[0].text = "kp:";
+turn_items[0].value_ptr = &kp_munuout;
+turn_items[0].eeprom_addr = kp_munu_addr;
+turn_items[0].scale_k = kp_munu_k;
+turn_items[0].edit_label = "kp:";
+turn_items[0].elast_label = "kp_elast:";
+
+turn_items[1].text = "kp_3:";
+turn_items[1].value_ptr = &kp_3_munuout;
+turn_items[1].eeprom_addr = kp_3_munu_addr;
+turn_items[1].scale_k = kp_3_munu_k;
+turn_items[1].edit_label = "kp_3:";
+turn_items[1].elast_label = "kp_3_elast:";
+
+turn_items[2].text = "kd:";
+turn_items[2].value_ptr = &kd_munuout;
+turn_items[2].eeprom_addr = kd_munu_addr;
+turn_items[2].scale_k = kd_munu_k;
+turn_items[2].edit_label = "kd:";
+turn_items[2].elast_label = "kd_elast:";
+
+turn_items[3].text = "max:";
+turn_items[3].value_ptr = &max_munuout;
+turn_items[3].eeprom_addr = max_munu_addr;
+turn_items[3].scale_k = max_munu_k;
+turn_items[3].edit_label = "max:";
+turn_items[3].elast_label = "max_elast:";
+
+turn_items[4].text = "min:";
+turn_items[4].value_ptr = &min_munuout;
+turn_items[4].eeprom_addr = min_munu_addr;
+turn_items[4].scale_k = min_munu_k;
+turn_items[4].edit_label = "min:";
+turn_items[4].elast_label = "min_elast:";
+
+turn_items[5].text = "xianfumax:";
+turn_items[5].value_ptr = &xianfumax_munuout;
+turn_items[5].eeprom_addr = xianfumax_munu_addr;
+turn_items[5].scale_k = xianfumax_munu_k;
+turn_items[5].edit_label = "xianfumax:";
+turn_items[5].elast_label = "xianfumax_elast:";
+
+turn_items[6].text = "basic";
+turn_items[6].value_ptr = &basic_munuout;
+turn_items[6].eeprom_addr = basic_munu_addr;
+turn_items[6].scale_k = basic_munu_k;
+turn_items[6].edit_label = "basic:";
+turn_items[6].elast_label = "basic_elast:";
+
+turn_items[7].text = "kpspeed";
+turn_items[7].value_ptr = &kpspeed_munuout;
+turn_items[7].eeprom_addr = kpspeed_munu_addr;
+turn_items[7].scale_k = kpspeed_munu_k;
+turn_items[7].edit_label = "kpspeed:";
+turn_items[7].elast_label = "kpspeed_elast:";
+
+turn_items[8].text = "kdspeed";
+turn_items[8].value_ptr = &kdspeed_munuout;
+turn_items[8].eeprom_addr = kdspeed_munu_addr;
+turn_items[8].scale_k = kdspeed_munu_k;
+turn_items[8].edit_label = "kdspeed:";
+turn_items[8].elast_label = "kdspeed_elast:";
+
+turn_items[9].text = "kispeed";
+turn_items[9].value_ptr = &kispeed_munuout;
+turn_items[9].eeprom_addr = kispeed_munu_addr;
+turn_items[9].scale_k = kispeed_munu_k;
+turn_items[9].edit_label = "kispeed:";
+turn_items[9].elast_label = "kispeed_elast:";
+
+/* ??????????*/
+angle_items[0].text = "kpangle:";
+angle_items[0].value_ptr = &kpangle_munuout;
+angle_items[0].eeprom_addr = kpangle_munu_addr;
+angle_items[0].scale_k = kpangle_munu_k;
+angle_items[0].edit_label = "kpangle:";
+angle_items[0].elast_label = "kpangle_elast:";
+
+angle_items[1].text = "kiangle:";
+angle_items[1].value_ptr = &kiangle_munuout;
+angle_items[1].eeprom_addr = kiangle_munu_addr;
+angle_items[1].scale_k = kiangle_munu_k;
+angle_items[1].edit_label = "kiangle:";
+angle_items[1].elast_label = "kiangle_elast:";
+
+angle_items[2].text = "kdangle:";
+angle_items[2].value_ptr = &kdangle_munuout;
+angle_items[2].eeprom_addr = kdangle_munu_addr;
+angle_items[2].scale_k = kdangle_munu_k;
+angle_items[2].edit_label = "kdangle:";
+angle_items[2].elast_label = "kdangle_elast:";
+
+angle_items[3].text = "maxangle:";
+angle_items[3].value_ptr = &maxangle_munuout;
+angle_items[3].eeprom_addr = maxangle_munu_addr;
+angle_items[3].scale_k = maxangle_munu_k;
+angle_items[3].edit_label = "maxangle:";
+angle_items[3].elast_label = "maxangle_elast:";
+
+angle_items[4].text = "minangle:";
+angle_items[4].value_ptr = &minangle_munuout;
+angle_items[4].eeprom_addr = minangle_munu_addr;
+angle_items[4].scale_k = minangle_munu_k;
+angle_items[4].edit_label = "minangle:";
+angle_items[4].elast_label = "minangle_elast:";
+
+/* ???????????? elast ?????? "desiredangle:"????????? */
+angle_items[5].text = "desiredangle:";
+angle_items[5].value_ptr = &desiredangle_munuout;
+angle_items[5].eeprom_addr = desiredangle_munu_addr;
+angle_items[5].scale_k = desiredangle_munu_k;
+angle_items[5].edit_label = "desiredangle:";
+angle_items[5].elast_label = "desiredangle:";
+
+angle_items[6].text = "";
+angle_items[6].action = manu_action_nothing;
+angle_items[7].text = "";
+angle_items[7].action = manu_action_nothing;
+angle_items[8].text = "";
+angle_items[8].action = manu_action_nothing;
+angle_items[9].text = "";
+angle_items[9].action = manu_action_nothing;
+
+/* ??????????*/
+state_items[0].text = "run:";
+state_items[0].value_ptr = &run_munuout;
+state_items[0].eeprom_addr = run_munu_addr;
+state_items[0].scale_k = run_munu_k;
+state_items[0].edit_label = "run:";
+state_items[0].elast_label = "run_elast:";
+
+state_items[1].text = "show:";
+state_items[1].value_ptr = &show_munuout;
+state_items[1].eeprom_addr = show_munu_addr;
+state_items[1].scale_k = show_munu_k;
+state_items[1].edit_label = "show:";
+state_items[1].elast_label = "show_elast:";
+
+state_items[2].text = "start_cap:";
+state_items[2].value_ptr = &start_cap_munuout;
+state_items[2].eeprom_addr = start_cap_munu_addr;
+state_items[2].scale_k = start_cap_munu_k;
+state_items[2].edit_label = "start_cap:";
+state_items[2].elast_label = "start_cap_elast:";
+
+state_items[3].text = "ben_enter:";
+state_items[3].value_ptr = &ben_enter_munuout;
+state_items[3].eeprom_addr = ben_enter_munu_addr;
+state_items[3].scale_k = ben_enter_munu_k;
+state_items[3].edit_label = "ben_enter:";
+state_items[3].elast_label = "ben_enter_elast:";
+
+state_items[4].text = "ben_angle:";
+state_items[4].value_ptr = &ben_angle_munuout;
+state_items[4].eeprom_addr = ben_angle_munu_addr;
+state_items[4].scale_k = ben_angle_munu_k;
+state_items[4].edit_label = "ben_angle:";
+state_items[4].elast_label = "ben_angle_elast:";
+
+state_items[5].text = "start_distance:";
+state_items[5].value_ptr = &start_distance_munuout;
+state_items[5].eeprom_addr = start_distance_munu_addr;
+state_items[5].scale_k = start_distance_munu_k;
+state_items[5].edit_label = "start_distance:";
+state_items[5].elast_label = "start_distance_elast:";
+
+state_items[6].text = "";
+state_items[6].action = manu_action_nothing;
+state_items[7].text = "";
+state_items[7].action = manu_action_nothing;
+state_items[8].text = "";
+state_items[8].action = manu_action_nothing;
+state_items[9].text = "";
+state_items[9].action = manu_action_nothing;
+
+main_menu.items = main_items;
+main_menu.item_count = (uint8)MANU_MAIN_ITEM_COUNT;
+main_menu.parent = 0;
+main_menu.render = manu_render_main;
+
+turn_menu.items = turn_items;
+turn_menu.item_count = (uint8)MANU_TURN_ITEM_COUNT;
+turn_menu.parent = &main_menu;
+turn_menu.render = manu_render_turn;
+
+angle_menu.items = angle_items;
+angle_menu.item_count = (uint8)MANU_ANGLE_ITEM_COUNT;
+angle_menu.parent = &main_menu;
+angle_menu.render = manu_render_angle;
+
+state_menu.items = state_items;
+state_menu.item_count = (uint8)MANU_STATE_ITEM_COUNT;
+state_menu.parent = &main_menu;
+state_menu.render = manu_render_state;
+}
+
+static void manu_menu_init(const ManuMenu *root)
+{
+manu_menu_state.current = root;
+manu_menu_state.selected = 1;
+manu_menu_state.editing = 0;
+manu_exit_request = 0;
+}
+
+static ManuKeyEvent manu_key_confirm(void)
+{
+/* ????????37 ?????36 ??????????????handle_key ?????? +/- */
+if (gpio_get_level(IO_P37) == 0)
+{
+Manu_keydelay(IO_P37);
+return MANU_KEY_UP;
+}
+if (gpio_get_level(IO_P36) == 0)
+{
+Manu_keydelay(IO_P36);
+return MANU_KEY_DOWN;
+}
+if (gpio_get_level(IO_P45) == 0)
+{
+Manu_keydelay(IO_P45);
+return MANU_KEY_BACK;
+}
+if (gpio_get_level(IO_P46) == 0)
+{
+Manu_keydelay(IO_P46);
+return MANU_KEY_ENTER;
+}
+return MANU_KEY_NONE;
+}
+
+static void manu_edit_enter(ManuMenuItem *item)
+{
+uint16 value;
+float show_float;
+manu_edit_item = item;
+manu_menu_state.editing = 1;
+manu_edit_origin = manu_eeprom_read_u16(item->eeprom_addr);
+
+tft180_clear(RGB565_BLACK);
+tft180_show_string(8, 16 * 0, (char *)item->edit_label);
+tft180_show_string(8, 16 * 3, (char *)item->elast_label);
+tft180_show_uint16(8, 16 * 4, manu_edit_origin);
+
+value = *item->value_ptr;
+manu_last_local = (uint16)(~value);
+manu_last_float = -1.0f;
+tft180_show_uint16(8, 16 * 1, value);
+tft180_show_uint16(8, 16 * 2, value);
+show_float = (float)value * item->scale_k;
+tft180_show_float(8, 16 * 5, show_float, 6, 6);
+manu_last_local = value;
+manu_last_float = show_float;
+}
+
+static void manu_edit_refresh(uint8 force)
+{
+uint16 value;
+float show_float;
+if (!manu_edit_item)
+{
+return;
+}
+value = *manu_edit_item->value_ptr;
+show_float = (float)value * manu_edit_item->scale_k;
+if (force || manu_last_local != value)
+{
+tft180_show_uint16(8, 16 * 1, value);
+tft180_show_uint16(8, 16 * 2, value);
+manu_last_local = value;
+}
+if (force || manu_last_float != show_float)
+{
+tft180_show_float(8, 16 * 5, show_float, 6, 6);
+manu_last_float = show_float;
+}
+}
+
+static void manu_edit_exit(void)
+{
+manu_menu_state.editing = 0;
+manu_edit_item = 0;
+manu_menu_state.current->render();
+Manu_show_cursor(manu_menu_state.selected);
+}
+
+static void manu_menu_handle_key(ManuKeyEvent event)
+{
+ManuMenuItem *item;
+uint8 index;
+
+if (event == MANU_KEY_NONE)
+{
+return;
+}
+
+if (manu_menu_state.editing)
+{
+if (!manu_edit_item)
+{
+manu_menu_state.editing = 0;
+return;
+}
+/* ?????manu ?????36 ????37 ??*/
+if (event == MANU_KEY_UP)
+{
+(*manu_edit_item->value_ptr)--;
+manu_edit_refresh(1);
+}
+else if (event == MANU_KEY_DOWN)
+{
+(*manu_edit_item->value_ptr)++;
+manu_edit_refresh(1);
+}
+else if (event == MANU_KEY_ENTER || event == MANU_KEY_BACK)
+{
+manu_edit_exit();
+}
+return;
+}
+
+/* ?????? */
+if (event == MANU_KEY_UP)
+{
+if (manu_menu_state.selected > 1)
+{
+manu_menu_state.selected--;
+}
+else
+{
+manu_menu_state.selected = manu_menu_state.current->item_count;
+}
+Manu_show_cursor(manu_menu_state.selected);
+return;
+}
+if (event == MANU_KEY_DOWN)
+{
+if (manu_menu_state.selected < manu_menu_state.current->item_count)
+{
+manu_menu_state.selected++;
+}
+else
+{
+manu_menu_state.selected = 1;
+}
+Manu_show_cursor(manu_menu_state.selected);
+return;
+}
+if (event == MANU_KEY_BACK)
+{
+if (manu_menu_state.current->parent)
+{
+manu_menu_state.current = manu_menu_state.current->parent;
+manu_menu_state.selected = 1;
+manu_menu_state.current->render();
+Manu_show_cursor(manu_menu_state.selected);
+}
+else
+{
+/* ?????????????????????????Manu_one ?????*/
+manu_save_all_to_eeprom();
+manu_exit_request = 1;
+}
+return;
+}
+if (event == MANU_KEY_ENTER)
+{
+index = manu_menu_state.selected;
+if (index < 1 || index > manu_menu_state.current->item_count)
+{
+return;
+}
+item = &manu_menu_state.current->items[index - 1];
+if (item->child)
+{
+manu_menu_state.current = item->child;
+manu_menu_state.selected = 1;
+manu_menu_state.current->render();
+Manu_show_cursor(manu_menu_state.selected);
+}
+else if (item->action)
+{
+item->action();
+manu_menu_state.current->render();
+Manu_show_cursor(manu_menu_state.selected);
+}
+else if (item->value_ptr)
+{
+manu_edit_enter(item);
+}
+return;
+}
+}
+
+static void manu_menu_loop(void)
+{
+while (!manu_exit_request)
+{
+manu_key = manu_key_confirm();
+manu_menu_handle_key(manu_key);
+system_delay_ms(1);
+}
+}
+/*
+???????????????????????????????????
+???1???????????????
+???2:?????????l???
+???3???????????r???
+pPid_Turn_Loop pid,
+*/
+int Manu_one(void)
+{ 
+char button_flag=1,ok_button=0;//??????????????????
+char text1[50];
+/*????????eprom???????????*/
+init_read_eepromdata();
+
+
+/*?????/
+main_manu_xianshi(&ok_button);
+sprintf(text1, "l2:%d     ", ok_button);
+tft180_show_string(10, 16*3, text1);  
+
+while(1)
+{
+/***********************************************/
+if(ok_button!=0)//????????????
+{
+uint8 index = (uint8)ok_button;
+if (index >= 1 && index <= (uint8)(sizeof(manu_main_actions) / sizeof(manu_main_actions[0])))
+{
+manu_main_actions[index - 1]();
+}
+main_manu_xianshi(&ok_button);
+/***********************************************/     
+
+}
+
+
+
+
+
+
+
+if(gpio_get_level(IO_P36)==0)//?????????????????
+{
+Manu_keydelay(IO_P36);
+
+//???????????????
+/*
+system_delay_ms(10);
+while(gpio_get_level(IO_P36)==0);
+system_delay_ms(10);
+*/
+button_flag++;
+if(button_flag==9)
+{
+button_flag=1;
+}
+
+}
+if(gpio_get_level(IO_P37)==0)//?????????????????
+{
+Manu_keydelay(IO_P37);
+
+//???????????????
+/*
+system_delay_ms(10);
+while(gpio_get_level(IO_P37)==0);
+system_delay_ms(10);
+*/
+button_flag--;
+if(button_flag==0)
+{
+button_flag=8;
+}
+}
+
+if(gpio_get_level(IO_P45)==0)//???????????????????????????????????eprom
+{
+Manu_keydelay(IO_P45);
+
+//???????????????
+
+manu_save_all_to_eeprom();
+return button_flag;
+}
+if(gpio_get_level(IO_P46)==0)//???????????????????
+{
+Manu_keydelay(IO_P46);
+
+//???????????????
+
+/*
+system_delay_ms(10);
+while(gpio_get_level(IO_P46)==0);
+system_delay_ms(10);
+*/    
+ok_button=button_flag;
+
+init_read_eepromdata();
+manu_menu_setup();
+manu_menu_init(&main_menu);
+manu_menu_state.current->render();
+Manu_show_cursor(manu_menu_state.selected);
+manu_menu_loop();
+return manu_menu_state.selected;
+
+tft180_show_string(8, 16*3, "xianfumax_elast:");      //3
+xianfumax_Local=Specific_para_adjust( xianfumax_munuout,xianfumax_munu_addr,xianfumax_Local,xianfumax_munu_k);
+xianfumax_munuout=xianfumax_Local;
+ok_button=0;//????????????????????????case
+
+
+
+}break; 
+case 7:
+{
+tft180_clear(RGB565_BLACK);//??????
+tft180_show_string(8, 16*0, "basic:");  
+
+tft180_show_string(8, 16*3, "basic_elast:");      //3
+basic_Local=Specific_para_adjust( basic_munuout,basic_munu_addr,basic_Local,basic_munu_k);
+basic_munuout=basic_Local;
+ok_button=0;//????????????????????????case
+
+
+
+}break;
+case 8:
+{
+tft180_clear(RGB565_BLACK);//??????
+tft180_show_string(8, 16*0, "kpspeed:");  
+
+tft180_show_string(8, 16*3, "kpspeed_elast:");      //3
+kpspeed_Local=Specific_para_adjust(kpspeed_munuout,kpspeed_munu_addr,kpspeed_Local,kpspeed_munu_k);
+kpspeed_munuout=kpspeed_Local;
+ok_button=0;//????????????????????????case
+
+
+}break;
+case 9:
+{   tft180_clear(RGB565_BLACK);//??????
+tft180_show_string(8, 16*0, "kdspeed:");  
+
+tft180_show_string(8, 16*3, "kdspeed_elast:");      //3
+kdspeed_Local=Specific_para_adjust( kdspeed_munuout,kdspeed_munu_addr,kdspeed_Local,kdspeed_munu_k);
+kdspeed_munuout=kdspeed_Local;
+ok_button=0;//????????????????????????case
+
+
+}break;
+case 10:
+{
+tft180_clear(RGB565_BLACK);//??????
+tft180_show_string(8, 16*0, "kispeed:");
+
+tft180_show_string(8, 16*3, "kispeed_elast:");      //3
+kispeed_Local=Specific_para_adjust( kispeed_munuout,kispeed_munu_addr,kispeed_Local,kispeed_munu_k);
+kispeed_munuout=kispeed_Local;
+ok_button=0;//????????????????????????case
+
+
+
+}break;     
+}
+//????????????
+/*?????/
+Manu_2_show();//?????????????????
+
+}
+/*
+
+
+
+
+*/
+
+if(gpio_get_level(IO_P45)==0)//???????????????
+{
+Manu_keydelay(IO_P45);
+
+//???????????????
+/*
+system_delay_ms(10);
+while(gpio_get_level(IO_P45)==0);
+system_delay_ms(10);
+*/
+
+//  ok_button=1;
+
+return ;
+}
+if(gpio_get_level(IO_P46)==0)//???????????????????????????????
+{
+Manu_keydelay(IO_P46);
+
+//???????????????
+/*
+system_delay_ms(10);
+while(gpio_get_level(IO_P46)==0);
+system_delay_ms(10);  
+*/
+t=1;
+ok_button=button_flag;
+
+}
+if(gpio_get_level(IO_P36)==0)//?????????????????
+{
+Manu_keydelay(IO_P36);
+
+//???????????????
+/*
+system_delay_ms(10);
+while(gpio_get_level(IO_P36)==0);
+system_delay_ms(10);
+*/
+button_flag++;
+if(button_flag>cursor)
+{
+button_flag=1;
+}
+
+}
+if(gpio_get_level(IO_P37)==0)//?????????????????

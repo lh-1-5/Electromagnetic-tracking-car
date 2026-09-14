@@ -1,0 +1,1203 @@
+#include "manu.h"
+/*
+*使用注意事项：要打开eeprom初始化使能，本文件已经初始化
+*uint8 iap_read_byte(uint32 addr)读取函数
+*void iap_write_byte(uint32 addr, uint8 byte);写入一个字节函数
+void iap_init(void);初始化函数
+void iap_write_buff(uint32 addr, uint8 *buf, uint16 len)一次性写多个字节
+void iap_erase_page(uint32 addr)擦除所写页
+*擦除完，则所有的值是1
+*
+*
+*/
+
+char textmunu[30];//用于给本文件屏幕输出的数组
+/*菜单传出全局变量，用于输出给转向环速度环初始化*/
+uint16 kp_munuout,kp_3_munuout,kd_munuout,max_munuout,min_munuout,xianfumax_munuout,basic_munuout,kpspeed_munuout,kdspeed_munuout,kispeed_munuout;
+uint16 kpangle_munuout,kdangle_munuout,kiangle_munuout,maxangle_munuout,minangle_munuout,desiredangle_munuout;//角速度环
+uint16 run_munuout,show_munuout,start_cap_munuout,ben_enter_munuout,ben_angle_munuout,start_distance_munuout;//全局状态变量
+
+typedef struct
+{
+	uint32 addr;
+	uint16 *value;
+} manu_eeprom_item_t;
+
+static uint16 manu_eeprom_read_u16(uint32 addr)
+{
+	return (uint16)((uint16)iap_read_byte(addr) | ((uint16)iap_read_byte(addr + 1) << 8));
+}
+
+static void manu_eeprom_write_u16(uint32 addr, uint16 value)
+{
+	iap_write_byte(addr, (uint8)value);
+	iap_write_byte(addr + 1, (uint8)(value >> 8));
+}
+
+static void manu_save_all_to_eeprom(void)
+{
+	uint8 i;
+	const manu_eeprom_item_t items[] = {
+		{kp_munu_addr, &kp_munuout},
+		{kp_3_munu_addr, &kp_3_munuout},
+		{kd_munu_addr, &kd_munuout},
+		{max_munu_addr, &max_munuout},
+		{min_munu_addr, &min_munuout},
+		{xianfumax_munu_addr, &xianfumax_munuout},
+		{basic_munu_addr, &basic_munuout},
+		{kpspeed_munu_addr, &kpspeed_munuout},
+		{kdspeed_munu_addr, &kdspeed_munuout},
+		{kispeed_munu_addr, &kispeed_munuout},
+
+		{kpangle_munu_addr, &kpangle_munuout},
+		{kiangle_munu_addr, &kiangle_munuout},
+		{kdangle_munu_addr, &kdangle_munuout},
+		{maxangle_munu_addr, &maxangle_munuout},
+		{minangle_munu_addr, &minangle_munuout},
+		{desiredangle_munu_addr, &desiredangle_munuout},
+
+		{run_munu_addr, &run_munuout},
+		{show_munu_addr, &show_munuout},
+		{start_cap_munu_addr, &start_cap_munuout},
+		{ben_enter_munu_addr, &ben_enter_munuout},
+		{ben_angle_munu_addr, &ben_angle_munuout},
+		{start_distance_munu_addr, &start_distance_munuout},
+	};
+
+	iap_erase_page(Erase_EEPROM);
+	for (i = 0; i < (uint8)(sizeof(items) / sizeof(items[0])); i++)
+	{
+		manu_eeprom_write_u16(items[i].addr, *items[i].value);
+	}
+}
+
+char cursor=10;//光标数字调参个数最大十个
+int t=0;
+
+ManuMenuState manu_menu_state = {0};
+ManuKeyEvent manu_key = MANU_KEY_NONE;
+
+#define MANU_MAIN_ITEM_COUNT   (8u)
+#define MANU_TURN_ITEM_COUNT   (10u)
+#define MANU_ANGLE_ITEM_COUNT  (10u)
+#define MANU_STATE_ITEM_COUNT  (10u)
+
+static ManuMenu main_menu;
+static ManuMenu turn_menu;
+static ManuMenu angle_menu;
+	init_read_eepromdata();
+	manu_menu_setup();
+	manu_menu_init(&main_menu);
+	manu_menu_state.current->render();
+	Manu_show_cursor(manu_menu_state.selected);
+	manu_menu_loop();
+	return manu_menu_state.selected;
+	state_items[1].value_ptr = &show_munuout;
+	state_items[1].eeprom_addr = show_munu_addr;
+	state_items[1].scale_k = show_munu_k;
+	state_items[1].edit_label = "show:";
+	state_items[1].elast_label = "show_elast:";
+
+	state_items[2].text = "start_cap:";
+	state_items[2].value_ptr = &start_cap_munuout;
+	state_items[2].eeprom_addr = start_cap_munu_addr;
+	state_items[2].scale_k = start_cap_munu_k;
+	state_items[2].edit_label = "start_cap:";
+	state_items[2].elast_label = "start_cap_elast:";
+
+	state_items[3].text = "ben_enter:";
+	state_items[3].value_ptr = &ben_enter_munuout;
+	state_items[3].eeprom_addr = ben_enter_munu_addr;
+	state_items[3].scale_k = ben_enter_munu_k;
+	state_items[3].edit_label = "ben_enter:";
+	state_items[3].elast_label = "ben_enter_elast:";
+
+	state_items[4].text = "ben_angle:";
+	state_items[4].value_ptr = &ben_angle_munuout;
+	state_items[4].eeprom_addr = ben_angle_munu_addr;
+	state_items[4].scale_k = ben_angle_munu_k;
+	state_items[4].edit_label = "ben_angle:";
+	state_items[4].elast_label = "ben_angle_elast:";
+
+	state_items[5].text = "start_distance:";
+	state_items[5].value_ptr = &start_distance_munuout;
+	state_items[5].eeprom_addr = start_distance_munu_addr;
+	state_items[5].scale_k = start_distance_munu_k;
+	state_items[5].edit_label = "start_distance:";
+	state_items[5].elast_label = "start_distance_elast:";
+
+	state_items[6].text = "";
+	state_items[6].action = manu_action_nothing;
+	state_items[7].text = "";
+	state_items[7].action = manu_action_nothing;
+	state_items[8].text = "";
+	state_items[8].action = manu_action_nothing;
+	state_items[9].text = "";
+	state_items[9].action = manu_action_nothing;
+
+	main_menu.items = main_items;
+	main_menu.item_count = (uint8)MANU_MAIN_ITEM_COUNT;
+	main_menu.parent = 0;
+	main_menu.render = manu_render_main;
+
+	turn_menu.items = turn_items;
+	turn_menu.item_count = (uint8)MANU_TURN_ITEM_COUNT;
+	turn_menu.parent = &main_menu;
+	turn_menu.render = manu_render_turn;
+
+	angle_menu.items = angle_items;
+	angle_menu.item_count = (uint8)MANU_ANGLE_ITEM_COUNT;
+	angle_menu.parent = &main_menu;
+	angle_menu.render = manu_render_angle;
+
+	state_menu.items = state_items;
+	state_menu.item_count = (uint8)MANU_STATE_ITEM_COUNT;
+	state_menu.parent = &main_menu;
+	state_menu.render = manu_render_state;
+}
+
+static void manu_menu_init(const ManuMenu *root)
+{
+	manu_menu_state.current = root;
+	manu_menu_state.selected = 1;
+	manu_menu_state.editing = 0;
+	manu_exit_request = 0;
+}
+
+static ManuKeyEvent manu_key_confirm(void)
+{
+	/* 列表模式：P37 上移、P36 下移；编辑模式里在 handle_key 里映射为 +/- */
+	if (gpio_get_level(IO_P37) == 0)
+	{
+		Manu_keydelay(IO_P37);
+		return MANU_KEY_UP;
+	}
+	if (gpio_get_level(IO_P36) == 0)
+	{
+		Manu_keydelay(IO_P36);
+		return MANU_KEY_DOWN;
+	}
+	if (gpio_get_level(IO_P45) == 0)
+	{
+		Manu_keydelay(IO_P45);
+		return MANU_KEY_BACK;
+	}
+	if (gpio_get_level(IO_P46) == 0)
+	{
+		Manu_keydelay(IO_P46);
+		return MANU_KEY_ENTER;
+	}
+	return MANU_KEY_NONE;
+}
+
+static void manu_edit_enter(ManuMenuItem *item)
+{
+	uint16 value;
+	float show_float;
+	manu_edit_item = item;
+	manu_menu_state.editing = 1;
+	manu_edit_origin = manu_eeprom_read_u16(item->eeprom_addr);
+
+	tft180_clear(RGB565_BLACK);
+	tft180_show_string(8, 16 * 0, (char *)item->edit_label);
+	tft180_show_string(8, 16 * 3, (char *)item->elast_label);
+	tft180_show_uint16(8, 16 * 4, manu_edit_origin);
+
+	value = *item->value_ptr;
+	manu_last_local = (uint16)(~value);
+	manu_last_float = -1.0f;
+	tft180_show_uint16(8, 16 * 1, value);
+	tft180_show_uint16(8, 16 * 2, value);
+	show_float = (float)value * item->scale_k;
+	tft180_show_float(8, 16 * 5, show_float, 6, 6);
+	manu_last_local = value;
+	manu_last_float = show_float;
+}
+
+static void manu_edit_refresh(uint8 force)
+{
+	uint16 value;
+	float show_float;
+	if (!manu_edit_item)
+	{
+		return;
+	}
+	value = *manu_edit_item->value_ptr;
+	show_float = (float)value * manu_edit_item->scale_k;
+	if (force || manu_last_local != value)
+	{
+		tft180_show_uint16(8, 16 * 1, value);
+		tft180_show_uint16(8, 16 * 2, value);
+		manu_last_local = value;
+	}
+	if (force || manu_last_float != show_float)
+	{
+		tft180_show_float(8, 16 * 5, show_float, 6, 6);
+		manu_last_float = show_float;
+	}
+}
+
+static void manu_edit_exit(void)
+{
+	manu_menu_state.editing = 0;
+	manu_edit_item = 0;
+	manu_menu_state.current->render();
+	Manu_show_cursor(manu_menu_state.selected);
+}
+
+static void manu_menu_handle_key(ManuKeyEvent event)
+{
+	ManuMenuItem *item;
+	uint8 index;
+
+	if (event == MANU_KEY_NONE)
+	{
+		return;
+	}
+
+	if (manu_menu_state.editing)
+	{
+		if (!manu_edit_item)
+		{
+			manu_menu_state.editing = 0;
+			return;
+		}
+		/* 保持旧 manu 行为：P36 加、P37 减 */
+		if (event == MANU_KEY_UP)
+		{
+			(*manu_edit_item->value_ptr)--;
+			manu_edit_refresh(1);
+		}
+		else if (event == MANU_KEY_DOWN)
+		{
+			(*manu_edit_item->value_ptr)++;
+			manu_edit_refresh(1);
+		}
+		else if (event == MANU_KEY_ENTER || event == MANU_KEY_BACK)
+		{
+			manu_edit_exit();
+		}
+		return;
+	}
+
+	/* 浏览模式 */
+	if (event == MANU_KEY_UP)
+	{
+		if (manu_menu_state.selected > 1)
+		{
+			manu_menu_state.selected--;
+		}
+		else
+		{
+			manu_menu_state.selected = manu_menu_state.current->item_count;
+		}
+		Manu_show_cursor(manu_menu_state.selected);
+		return;
+	}
+	if (event == MANU_KEY_DOWN)
+	{
+		if (manu_menu_state.selected < manu_menu_state.current->item_count)
+		{
+			manu_menu_state.selected++;
+		}
+		else
+		{
+			manu_menu_state.selected = 1;
+		}
+		Manu_show_cursor(manu_menu_state.selected);
+		return;
+	}
+	if (event == MANU_KEY_BACK)
+	{
+		if (manu_menu_state.current->parent)
+		{
+			manu_menu_state.current = manu_menu_state.current->parent;
+			manu_menu_state.selected = 1;
+			manu_menu_state.current->render();
+			Manu_show_cursor(manu_menu_state.selected);
+		}
+		else
+		{
+			/* 主菜单按返回：保存并退出（保持原 Manu_one 行为） */
+			manu_save_all_to_eeprom();
+			manu_exit_request = 1;
+		}
+		return;
+	}
+	if (event == MANU_KEY_ENTER)
+	{
+		index = manu_menu_state.selected;
+		if (index < 1 || index > manu_menu_state.current->item_count)
+		{
+			return;
+		}
+		item = &manu_menu_state.current->items[index - 1];
+		if (item->child)
+		{
+			manu_menu_state.current = item->child;
+			manu_menu_state.selected = 1;
+			manu_menu_state.current->render();
+			Manu_show_cursor(manu_menu_state.selected);
+		}
+		else if (item->action)
+		{
+			item->action();
+			manu_menu_state.current->render();
+			Manu_show_cursor(manu_menu_state.selected);
+		}
+		else if (item->value_ptr)
+		{
+			manu_edit_enter(item);
+		}
+		return;
+	}
+}
+
+static void manu_menu_loop(void)
+{
+	while (!manu_exit_request)
+	{
+		manu_key = manu_key_confirm();
+		manu_menu_handle_key(manu_key);
+		system_delay_ms(1);
+	}
+}
+/*
+本函数是菜单入口，使用方法是直接放入初始化函数
+参数1：为转向环结构体指针
+参数2:速度环结构体l轮子
+参数3：速度环结构体r轮子
+pPid_Turn_Loop pid,
+*/
+int Manu_one(void)
+{	
+	char button_flag=1,ok_button=0;//初始化为第一行，确认标志
+char text1[50];
+/*初始化，将eeprom的值先保存下来*/
+		init_read_eepromdata();
+
+
+		/*优化点*/
+		main_manu_xianshi(&ok_button);
+	sprintf(text1, "l2:%d     ", ok_button);
+	tft180_show_string(10, 16*3, text1);	
+	
+	while(1)
+	{
+/***********************************************/
+		if(ok_button!=0)//进入二级菜单入口
+		{
+			uint8 index = (uint8)ok_button;
+			if (index >= 1 && index <= (uint8)(sizeof(manu_main_actions) / sizeof(manu_main_actions[0])))
+			{
+				manu_main_actions[index - 1]();
+			}
+			main_manu_xianshi(&ok_button);
+/***********************************************/			
+			
+		}
+			
+		
+		
+		
+		
+		
+		
+		if(gpio_get_level(IO_P36)==0)//按下增加按键，选项下移
+		{
+			 Manu_keydelay(IO_P36);
+
+//优化点，按键延时优化
+			/*
+			system_delay_ms(10);
+			while(gpio_get_level(IO_P36)==0);
+		  system_delay_ms(10);
+		  */
+			button_flag++;
+			if(button_flag==9)
+			{
+				button_flag=1;
+			}
+				
+		}
+		if(gpio_get_level(IO_P37)==0)//按下减小按键，选项上移
+		{
+			Manu_keydelay(IO_P37);
+
+			//优化点，按键延时优化
+			/*
+			system_delay_ms(10);
+			while(gpio_get_level(IO_P37)==0);
+		  	system_delay_ms(10);
+			*/
+			button_flag--;
+			if(button_flag==0)
+			{
+				button_flag=8;
+			}
+		}
+		
+		if(gpio_get_level(IO_P45)==0)//返回按键，返回主函数，并且将调整好的值全部传给eeprom
+		{
+			Manu_keydelay(IO_P45);
+
+			//优化点，按键延时优化
+
+			manu_save_all_to_eeprom();
+			return button_flag;
+		}
+		if(gpio_get_level(IO_P46)==0)//确认按键，进入下一级菜单
+		{
+			Manu_keydelay(IO_P46);
+
+			//优化点，按键延时优化
+
+			/*
+			system_delay_ms(10);
+			while(gpio_get_level(IO_P46)==0);
+		  system_delay_ms(10);
+		  	*/		
+		ok_button=button_flag;
+			
+			init_read_eepromdata();
+			manu_menu_setup();
+			manu_menu_init(&main_menu);
+			manu_menu_state.current->render();
+			Manu_show_cursor(manu_menu_state.selected);
+			manu_menu_loop();
+			return manu_menu_state.selected;
+
+			tft180_show_string(8, 16*3, "xianfumax_elast:"); 			//3
+			xianfumax_Local=Specific_para_adjust( xianfumax_munuout,xianfumax_munu_addr,xianfumax_Local,xianfumax_munu_k);
+			xianfumax_munuout=xianfumax_Local;
+			ok_button=0;//标志位置回零，防止立刻再次进入此case
+
+
+			
+		}break;	
+	case 7:
+		{
+			tft180_clear(RGB565_BLACK);//先清屏幕
+			tft180_show_string(8, 16*0, "basic:");	
+
+			tft180_show_string(8, 16*3, "basic_elast:"); 			//3
+			basic_Local=Specific_para_adjust( basic_munuout,basic_munu_addr,basic_Local,basic_munu_k);
+			basic_munuout=basic_Local;
+			ok_button=0;//标志位置回零，防止立刻再次进入此case
+
+			
+			
+		}break;
+	case 8:
+		{
+		tft180_clear(RGB565_BLACK);//先清屏幕
+		tft180_show_string(8, 16*0, "kpspeed:");	
+
+		tft180_show_string(8, 16*3, "kpspeed_elast:"); 			//3
+		kpspeed_Local=Specific_para_adjust(kpspeed_munuout,kpspeed_munu_addr,kpspeed_Local,kpspeed_munu_k);
+		kpspeed_munuout=kpspeed_Local;
+		ok_button=0;//标志位置回零，防止立刻再次进入此case
+
+			
+		}break;
+		case 9:
+		{		tft180_clear(RGB565_BLACK);//先清屏幕
+		tft180_show_string(8, 16*0, "kdspeed:");	
+
+		tft180_show_string(8, 16*3, "kdspeed_elast:"); 			//3
+		kdspeed_Local=Specific_para_adjust( kdspeed_munuout,kdspeed_munu_addr,kdspeed_Local,kdspeed_munu_k);
+		kdspeed_munuout=kdspeed_Local;
+		ok_button=0;//标志位置回零，防止立刻再次进入此case
+
+			
+		}break;
+		case 10:
+		{
+		tft180_clear(RGB565_BLACK);//先清屏幕
+		tft180_show_string(8, 16*0, "kispeed:");
+
+		tft180_show_string(8, 16*3, "kispeed_elast:"); 			//3
+		kispeed_Local=Specific_para_adjust( kispeed_munuout,kispeed_munu_addr,kispeed_Local,kispeed_munu_k);
+		kispeed_munuout=kispeed_Local;
+		ok_button=0;//标志位置回零，防止立刻再次进入此case
+
+			
+			
+		}break;			
+	}
+//返回回来继续显示
+/*优化点*/
+Manu_2_show();//第一个二级菜单页面显示
+
+		}
+		/*
+	
+
+
+
+		*/
+		
+		if(gpio_get_level(IO_P45)==0)//返回按键，返回主菜单
+		{
+			Manu_keydelay(IO_P45);
+
+			//优化点，按键延时优化
+			/*
+			system_delay_ms(10);
+			while(gpio_get_level(IO_P45)==0);
+		  system_delay_ms(10);
+		  */
+		  
+		//	ok_button=1;
+
+			return ;
+		}
+		if(gpio_get_level(IO_P46)==0)//确认按键，此确认用于进入具体参数调整数值
+		{
+			Manu_keydelay(IO_P46);
+
+			//优化点，按键延时优化
+			/*
+			system_delay_ms(10);
+			while(gpio_get_level(IO_P46)==0);
+		  system_delay_ms(10);	
+			*/
+     t=1;
+		ok_button=button_flag;
+			
+		}
+		if(gpio_get_level(IO_P36)==0)//按下增加按键，选项下移
+		{
+			Manu_keydelay(IO_P36);
+
+			//优化点，按键延时优化
+			/*
+			system_delay_ms(10);
+			while(gpio_get_level(IO_P36)==0);
+		  system_delay_ms(10);
+		  */
+			button_flag++;
+			if(button_flag>cursor)
+			{
+				button_flag=1;
+			}
+				
+		}
+		if(gpio_get_level(IO_P37)==0)//按下减小按键，选项上移
+		{
+			Manu_keydelay(IO_P37);
+
+			//优化点，按键延时优化
+			/*
+			system_delay_ms(10);
+			while(gpio_get_level(IO_P37)==0);
+		  system_delay_ms(10);*/
+			button_flag--;
+			if(button_flag==0)
+			{
+				button_flag=cursor;
+			}
+		}	
+		
+		
+			 Manu_show_cursor(button_flag);
+			system_delay_ms(1);
+	/*优化点：光标显示函数	
+		switch(button_flag)//显示光标函数
+		{
+			case 1:
+			{
+					tft180_show_string(0, 16*0, "*"); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+
+			}break;
+			case 2:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, "*"); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+
+			}break;
+					case 3:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, "*"); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+
+			}break;
+					case 4:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, "*"); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+
+			}break;
+					case 5:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, "*"); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+
+			}break;
+					case 6:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, "*"); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+			}break;		
+					case 7:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, "*"); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+			}break;			
+			case 8:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, "*"); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+			}break;			
+			case 9:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, "*"); 			//显示字符串
+					tft180_show_string(0, 16*9, " "); 			//显示字符串
+			}break;			
+			case 10:
+			{
+					tft180_show_string(0, 16*0, " "); 			//显示字符串
+					tft180_show_string(0, 16*1, " "); 			//显示字符串
+					tft180_show_string(0, 16*2, " "); 			//显示字符串
+					tft180_show_string(0, 16*3, " "); 			//显示字符串
+					tft180_show_string(0, 16*4, " "); 			//显示字符串
+					tft180_show_string(0, 16*5, " "); 			//显示字符串
+					tft180_show_string(0, 16*6, " "); 			//显示字符串
+					tft180_show_string(0, 16*7, " "); 			//显示字符串
+					tft180_show_string(0, 16*8, " "); 			//显示字符串
+					tft180_show_string(0, 16*9, "*"); 			//显示字符串
+			}break;			
+			
+		}
+	*/	
+  }
+	
+	return ;
+}
+
+
+/***********************************************/
+/*
+二级菜单角度环参数调整函数
+
+*/
+
+int Manu_two_adjust(void)
+{
+	ManuKeyEvent event;
+	uint8 was_editing;
+
+	manu_menu_setup();
+	manu_menu_state.current = &turn_menu;
+	manu_menu_state.selected = 1;
+	manu_menu_state.editing = 0;
+	manu_menu_state.current->render();
+	Manu_show_cursor(manu_menu_state.selected);
+
+	while (1)
+	{
+		event = manu_key_confirm();
+		if (event == MANU_KEY_NONE)
+		{
+			system_delay_ms(1);
+			continue;
+		}
+		was_editing = manu_menu_state.editing;
+		manu_menu_handle_key(event);
+		if (event == MANU_KEY_BACK && !was_editing)
+		{
+			break;
+		}
+		system_delay_ms(1);
+	}
+	return 0;
+}
+
+int Manu_two_adjustangle(void)//pPid_Turn_Loop pid,
+{
+	ManuKeyEvent event;
+	uint8 was_editing;
+
+	manu_menu_setup();
+	manu_menu_state.current = &angle_menu;
+	manu_menu_state.selected = 1;
+	manu_menu_state.editing = 0;
+	manu_menu_state.current->render();
+	Manu_show_cursor(manu_menu_state.selected);
+
+	while (1)
+	{
+		event = manu_key_confirm();
+		if (event == MANU_KEY_NONE)
+		{
+			system_delay_ms(1);
+			continue;
+		}
+		was_editing = manu_menu_state.editing;
+		manu_menu_handle_key(event);
+		if (event == MANU_KEY_BACK && !was_editing)
+		{
+			break;
+		}
+		system_delay_ms(1);
+	}
+	return 0;
+}
+
+#if 1
+
+/*
+*二级菜单，用于调整全局状态标志位
+*包含电量，入环阈值，屏幕显示标志位，运行标志位
+*run,show,start_cap,ben_enter
+*
+*
+*
+*/
+
+
+
+
+int Manu_two_adjuconfig(void)//调整全局状态变量
+{
+	ManuKeyEvent event;
+	uint8 was_editing;
+
+	manu_menu_setup();
+	manu_menu_state.current = &state_menu;
+	manu_menu_state.selected = 1;
+	manu_menu_state.editing = 0;
+	manu_menu_state.current->render();
+	Manu_show_cursor(manu_menu_state.selected);
+
+	while (1)
+	{
+		event = manu_key_confirm();
+		if (event == MANU_KEY_NONE)
+		{
+			system_delay_ms(1);
+			continue;
+		}
+		was_editing = manu_menu_state.editing;
+		manu_menu_handle_key(event);
+		if (event == MANU_KEY_BACK && !was_editing)
+		{
+			break;
+		}
+		system_delay_ms(1);
+	}
+	return 0;
+}
+
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*进入具体参数调整界面
+*为了增加代码复用性而产生的函数
+*用于二级菜单下面的函数
+*输入参数1：全局变量
+*输入参数2：eeprom的地址数值传入
+*输入参数3：二级菜单下的局部变量地址传入
+
+*注意：两个字符串显示函数不包括在此函数内需要在此函数前加对应显示字符串的函数语句
+用处是提示此次更改数据的数据名字是什么
+例如：	
+	tft180_clear(RGB565_BLACK);//先清屏幕
+	tft180_show_string(8, 16*0, "kp:"); 			
+	tft180_show_string(8, 16*3, "kp_elast:"); 			
+*注意：加在此函数后面
+	ok_button=0;//标志位置回零，防止立刻再次进入此case
+
+*///uint16
+
+uint16 Specific_para_adjust(uint16 _munuout,uint32 _munu_addr,uint16  _Local,float _mannu_k)
+{
+	uint16 origin_value;
+	uint16 last_local;
+	uint16 last_munuout;
+	float last_float;
+	uint8 changed;
+	float now_float;
+//	tft180_clear(RGB565_BLACK);//先清屏幕
+//	tft180_show_string(8, 16*0, "kp:"); 			//3
+//static uint32 Transit_Local=* _Local;
+	origin_value = manu_eeprom_read_u16(_munu_addr);
+	_Local = origin_value;
+
+//	tft180_show_string(8, 16*3, "kp_elast:"); 			//3
+	tft180_show_uint16(8, 16*4, origin_value);
+	if(_munuout!=_Local)
+	{
+		_Local=_munuout;
+	}
+
+	last_local = (uint16)(~_Local);
+	last_munuout = (uint16)(~_munuout);
+	last_float = -1.0f;
+
+	tft180_show_uint16(8, 16*1, _Local);
+
+	//加减原本数据
+	while(1)
+	{
+		changed = 0;
+		if(gpio_get_level(IO_P37)==0)//加一按键
+		{
+			Manu_keydelay(IO_P37);
+
+			//优化点，按键延时优化
+		  _Local++;
+		  changed = 1;
+			
+		}
+		 if(gpio_get_level(IO_P36)==0)//减一按键
+		{
+			Manu_keydelay(IO_P36);
+
+			//优化点，按键延时优化
+		  _Local--;
+		  changed = 1;
+			
+		}
+		if(gpio_get_level(IO_P46)==0)//确认按键，后续统一一起存入eeprom，然后返回参数设置选择
+		{
+			Manu_keydelay(IO_P46);
+
+			//优化点，按键延时优化			
+		  return _Local;
+
+		}
+		if(gpio_get_level(IO_P45)==0)//返回按键，返回上一级菜单函数，
+		{
+			Manu_keydelay(IO_P45);
+
+			//优化点，按键延时优化	
+		//	ok_button=1;
+			return _Local;
+		}
+
+
+		_munuout=_Local;
+		now_float = _munuout * _mannu_k;
+		if (changed || last_local != _Local)
+		{
+			tft180_show_uint16(8, 16*1, _Local);
+			last_local = _Local;
+		}
+		if (changed || last_munuout != _munuout)
+		{
+			tft180_show_uint16(8, 16*2, _munuout);
+			last_munuout = _munuout;
+		}
+		if (changed || last_float != now_float)
+		{
+			tft180_show_float(8,16*5, now_float, 6, 6);
+			last_float = now_float;
+		}
+		system_delay_ms(1);
+
+//		ok_button=0;//标志位置回零，防止立刻再次进入此case
+	}
+}
+
+
+
+
+
+/*
+优化尺寸
+*显示光标函数
+
+*/
+void Manu_show_cursor(uint8 cursor)
+{
+	static uint8 last_cursor = 0;
+	if (cursor == last_cursor)
+	{
+		return;
+	}
+	if (last_cursor >= 1 && last_cursor <= 10)
+	{
+		tft180_show_string(0, 16 * (last_cursor - 1), " ");
+	}
+	if (cursor >= 1 && cursor <= 10)
+	{
+		tft180_show_string(0, 16 * (cursor - 1), "*");
+	}
+	last_cursor = cursor;
+}
+
+
+
+
+/*
+按键延时函数优化
+*/
+
+void Manu_keydelay(gpio_pin_enum pin)
+{
+system_delay_ms(10);
+while(gpio_get_level(pin)==0);
+  system_delay_ms(10);
+}
+
+/*
+空白页函数优化
+*/
+
+void black_manu(void)
+{
+tft180_clear(RGB565_BLACK);//先清屏幕
+			tft180_show_string(8, 16*0, "Nothing");
+			tft180_show_string(8, 16*3, "Nothing"); 			//3
+
+			system_delay_ms(1000); 
+			tft180_clear(RGB565_BLACK);//先清屏幕
+
+}
+/*
+回归主菜单，显示屏幕函数组件优化
+参数是用于将输入值清零
+*/
+void main_manu_xianshi(char *qingchu)
+{
+	char text2[20];
+	*qingchu=0;
+	tft180_clear(RGB565_BLACK);//先清屏幕
+
+	tft180_show_string(10, 16*0, "Adjust param"); 			//显示字符串
+	tft180_show_string(10, 16*1, "Adjust paramangle"); 			//显示字符串
+	tft180_show_string(10, 16*2, "Adjust state"); 			//显示字符串
+//	tft180_show_string(10, 16*3, "c"); 			//显示字符串
+//	tft180_show_string(10, 16*4, "d"); 			//显示字符串
+	sprintf(text2, "r2:%d     ", t);
+	tft180_show_string(1, 16*4, text2);
+	tft180_show_string(10, 16*5, "e"); 			//显示字符串
+	tft180_show_string(10, 16*6, "f"); 			//显示字符串
+	tft180_show_string(10, 16*7, "g"); 			//显示字符串
+}
+
+
+void Manu_2_show(void)//第一个二级菜单页面显示
+{
+
+tft180_clear(RGB565_BLACK);//先清屏幕
+tft180_show_string(10, 16*0, "kp:"); 			//
+tft180_show_string(10, 16*1, "kp_3:"); 			//
+tft180_show_string(10, 16*2, "kd:"); 			//
+tft180_show_string(10, 16*3, "max:"); 			//
+tft180_show_string(10, 16*4, "min:"); 			//限幅
+tft180_show_string(10, 16*5, "xianfumax:"); 			//速度环限幅
+tft180_show_string(10, 16*6, "basic"); 			//速度换基础目标值
+tft180_show_string(10, 16*7, "kpspeed"); 			//显示字符串
+tft180_show_string(10, 16*8, "kdspeed"); 			//速度环kd
+tft180_show_string(10, 16*9, "kispeed"); 			//速度环ki
+
+}
+
+
+/*第二个二级菜单显示*/
+void manu_2_angle(void)
+{
+tft180_clear(RGB565_BLACK);//先清屏幕
+tft180_show_string(10, 16*0, "kpangle:"); 			//
+tft180_show_string(10, 16*1, "kiangle:"); 			//
+tft180_show_string(10, 16*2, "kdangle:"); 			//
+tft180_show_string(10, 16*3, "maxangle:"); 			//
+tft180_show_string(10, 16*4, "minangle:"); 			//
+tft180_show_string(10, 16*5, "desiredangle:"); 		//
+tft180_show_string(10, 16*6, " "); 			//
+tft180_show_string(10, 16*7, " "); 			//
+tft180_show_string(10, 16*8, " "); 			//
+tft180_show_string(10, 16*9, " "); 			//run_Local,show_Local,start_cap_Local,ben_enter_Local
+
+}
+
+
+/*第3个二级菜单显示，全局状态变量*/
+void manu_3_state(void)
+{
+tft180_clear(RGB565_BLACK);//先清屏幕
+tft180_show_string(10, 16*0, "run:"); 			//
+tft180_show_string(10, 16*1, "show:"); 			//
+tft180_show_string(10, 16*2, "start_cap:"); 			//
+tft180_show_string(10, 16*3, "ben_enter:"); 			//
+tft180_show_string(10, 16*4, "ben_angle"); 			//
+tft180_show_string(10, 16*5, "start_distance"); 		//
+tft180_show_string(10, 16*6, " "); 			//
+tft180_show_string(10, 16*7, " "); 			//
+tft180_show_string(10, 16*8, " "); 			//
+tft180_show_string(10, 16*9, " "); 			//run_Local,show_Local,start_cap_Local,ben_enter_Local
+
+}
+
+
+
+
+
+
+void nothing_function(char *ok_button)
+{
+	tft180_clear(RGB565_BLACK);//先清屏幕
+		tft180_show_string(8, 16*0, "Nothing");
+		tft180_show_string(8, 16*3, "Nothing"); 			//3
+		*ok_button=0;//标志位置回零，防止立刻再次进入此case
+		system_delay_ms(1000); 
+
+}
+
+//初始化将eeprom的数据读出来用于初始化各个参数
+
+void init_read_eepromdata(void)
+{
+		kp_munuout = manu_eeprom_read_u16(kp_munu_addr);
+		kp_3_munuout = manu_eeprom_read_u16(kp_3_munu_addr);
+		kd_munuout = manu_eeprom_read_u16(kd_munu_addr);
+		max_munuout = manu_eeprom_read_u16(max_munu_addr);
+		min_munuout = manu_eeprom_read_u16(min_munu_addr);
+		xianfumax_munuout = manu_eeprom_read_u16(xianfumax_munu_addr);
+		basic_munuout = manu_eeprom_read_u16(basic_munu_addr);
+		kpspeed_munuout = manu_eeprom_read_u16(kpspeed_munu_addr);
+		kdspeed_munuout = manu_eeprom_read_u16(kdspeed_munu_addr);
+		kispeed_munuout = manu_eeprom_read_u16(kispeed_munu_addr);
+
+		kpangle_munuout = manu_eeprom_read_u16(kpangle_munu_addr);
+		kiangle_munuout = manu_eeprom_read_u16(kiangle_munu_addr);
+		kdangle_munuout = manu_eeprom_read_u16(kdangle_munu_addr);
+		maxangle_munuout = manu_eeprom_read_u16(maxangle_munu_addr);
+		minangle_munuout = manu_eeprom_read_u16(minangle_munu_addr);
+		desiredangle_munuout = manu_eeprom_read_u16(desiredangle_munu_addr);
+
+		run_munuout = manu_eeprom_read_u16(run_munu_addr);
+		show_munuout = manu_eeprom_read_u16(show_munu_addr);
+		start_cap_munuout = manu_eeprom_read_u16(start_cap_munu_addr);
+		ben_enter_munuout = manu_eeprom_read_u16(ben_enter_munu_addr);
+		ben_angle_munuout = manu_eeprom_read_u16(ben_angle_munu_addr);
+		start_distance_munuout = manu_eeprom_read_u16(start_distance_munu_addr);
+
+
+	
+	
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
